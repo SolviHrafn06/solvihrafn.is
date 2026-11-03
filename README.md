@@ -1,20 +1,36 @@
-# Sölva Hrafn — solvihrafn.is
+# Sölvi Hrafn — solvihrafn.is
 
-Íslensk lendingarsíða með aðlögun að símum og þremur áherslulitum.
+Persónuleg vefsíða og ferilskrá í Next.js App Router, React og Motion.
 
-## Breyta síðunni
+## Keyra á tölvunni
 
-- `index.html`: texti, tenglar og uppbygging.
-- `style.css`: útlit, litir og skjástærðir.
-- `script.js`: litaval og ártal.
-- `favicon.svg`: tákn í vafraflipanum.
+Node.js 22 eða nýrra og pnpm 10.28.2:
 
-Opnaðu `index.html` í vafra til að skoða síðuna á tölvunni. Engin uppsetning eða byggingarskref eru nauðsynleg. Letur er sótt frá Google Fonts, með kerfisletri til vara.
+```sh
+pnpm install
+pnpm dev
+```
 
-## GitHub Pages
+Opnaðu http://localhost:3000. Breytingar sjást jafnóðum á meðan þróunarþjónninn keyrir.
 
-Veldu **Settings → Pages → Deploy from a branch → main → / (root)** og vistaðu.
-Þegar birting hefur verið virkjuð er sjálfgefin slóð https://solvihrafn06.github.io/solvihrafn.is/.
+## Hvar breyti ég?
 
-Til að nota eigið lén þarf að bæta `solvihrafn.is` við undir **Custom domain** í Pages og setja samsvarandi DNS færslur hjá ISNIC. Ekki er búið að stilla lénið með þessum skrám einum saman.
+- `app/page.js`: forsíðan.
+- `app/ferilskra/page.js`: ferilskráin.
+- `app/experience.js`: valmynd, litaval, hreyfingar og fótur.
+- `app/globals.css`: grunnútlit og ferilskrá.
+- `app/enhancements.css`: hreyfingar og sjónræn áhrif.
+- `public/`: favicon, CNAME og aðrar opinberar skrár.
 
+Litaval og hreyfirofi eru vistuð í vafranum. Síðan virðir kerfisstillinguna fyrir minni hreyfingar.
+
+## Birting
+
+GitHub Actions byggir Next.js sjálfkrafa og birtir `out/` á GitHub Pages þegar breyting er send á `main`.
+Slóðirnar eru https://solvihrafn.is/ og https://solvihrafn.is/ferilskra/.
+
+`pnpm build` býr til statískar síður í `out/`; mappan er ekki geymd í Git.
+GitHub Pages notar **GitHub Actions** sem birtingaruppsprettu.
+`public/CNAME` varðveitir eigið lén í útflutningnum.
+
+Síðurnar eru statískar. Innskráning, gagnagrunnur og Next.js aðgerðir sem þurfa þjón krefjast sér bakenda eða annarrar hýsingar.
