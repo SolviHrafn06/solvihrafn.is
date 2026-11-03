@@ -24,7 +24,7 @@ function Platformer({ onClose }) {
     setHud({stars:0,deaths:0,timeMs:0,won:false,level:0});
     try {const result=await scoreRequest('/api/runs',{},controller.signal);if(controller.signal.aborted)return;setRunToken(result.runToken);setRunMode('online');setConnectionNote('Keppnisferð · kláraðu öll fjögur borðin til að skrá met.');}
     catch(error){if(error.name==='AbortError')return;setRunMode('practice');setConnectionNote('Metataflan næst ekki. Þú getur spilað æfingaferð; byrjaðu aftur til að reyna tengingu á ný.');}
-    readyRef.current=true;pause(document.hidden);canvasRef.current?.focus();
+    readyRef.current=true;pause(document.hidden||!document.hasFocus());canvasRef.current?.focus();
   }
   useEffect(()=>{restart();return()=>requestRef.current?.abort();},[]);
 
