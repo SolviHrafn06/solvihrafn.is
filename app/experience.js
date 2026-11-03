@@ -54,7 +54,7 @@ export function SiteHeader() {
       <Link href={path === '/' ? '/#profustofa' : '/'}>{path === '/' ? 'Prófanir' : 'Forsíða'}</Link>
       <Link href="/#leikir">Leikir</Link>
       <Link href="/ferilskra/" aria-current={path.startsWith('/ferilskra') ? 'page' : undefined}>Ferilskrá</Link>
-      <a href="/Flakkari/" target="_blank" rel="noopener noreferrer">Flakkari <span aria-hidden="true">↗</span></a>
+      <a href="http://flakkari.solvihrafn.is:6893/web/#/home" target="_blank" rel="noopener noreferrer">Flakkari <span aria-hidden="true">↗</span></a>
       <a href="https://github.com/SolviHrafn06" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
     </nav>
   </header></>;
