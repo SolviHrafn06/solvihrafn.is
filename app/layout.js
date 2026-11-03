@@ -1,6 +1,7 @@
 import './globals.css';
 import './enhancements.css';
 import './showcase.css';
+import './platformer.css';
 import { SiteExperience } from './experience';
 
 export const metadata = {

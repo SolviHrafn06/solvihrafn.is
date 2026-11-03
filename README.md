@@ -34,7 +34,14 @@ HTML, CSS og Markdown birtast í einangruðum iframe með lokuðum skriftum og n
 Java, C# og C++ sýna gagnvirk JavaScript-reiknilíkön ásamt samsvarandi, niðurhalanlegum frumkóða. Þau þýða ekki almennan Java/C#/C++ kóða í vafranum.
 Leikjahlutinn vísar á https://solvihrafn.itch.io/.
 
-## Birting
+## Stjörnuhlaup
+
+„Prófa leik“ við itch.io-hlekkinn opnar lítinn Canvas-platformer með CRT-áferð.
+Örvar eða A/D hreyfa leikmann, bilslá/W/upp ör hoppar, P gerir hlé og R byrjar aftur.
+Snertihnappar eru einnig í boði. Safna þarf þremur stjörnum og komast að fánanum.
+`app/platformer.js` sér um leikglugga og stýringu; `app/platformer-engine.mjs` um eðlisfræði og teikningu; `app/platformer.css` um útlit og CRT-áferð.
+
+## Birting á GitHub Pages
 
 GitHub Actions byggir Next.js sjálfkrafa og birtir `out/` á GitHub Pages þegar breyting er send á `main`.
 Slóðirnar eru https://solvihrafn.is/ og https://solvihrafn.is/ferilskra/.
