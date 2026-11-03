@@ -34,4 +34,5 @@ export default function Resume() {
       <div className="cv-content"><p className="cv-lead">Frá hugmynd að tölvuleik.</p><p>Ég vinn að þróun tölvuleiks með félögum mínum og stefnum við á útgáfu á Steam. Ég nýti frítímann til að læra meira um forritun og tækni. Önnur áhugamál eru Formúla 1 og samvera með fjölskyldu og vinum.</p><a className="cv-github" href="https://github.com/SolviHrafn06" target="_blank" rel="noopener noreferrer">Skoða GitHub <span aria-hidden="true">↗</span></a></div>
     </Reveal>
   </AnimatedPage><SiteFooter /></>;
+  
 }
