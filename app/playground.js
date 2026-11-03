@@ -128,9 +128,21 @@ export function Playground() {
   </div>;
 }
 
+
+function getAge(birthDate) {
+  const today = new Date();
+  const birth = new Date(birthDate);
+  let age = today.getFullYear() - birth.getFullYear();
+  const hadBirthdayThisYear =
+    today.getMonth() > birth.getMonth() ||
+    (today.getMonth() === birth.getMonth() && today.getDate() >= birth.getDate());
+  if (!hadBirthdayThisYear) age--;
+  return age;
+}
+
 export function HeroConsole() {
   const [run, setRun] = useState(0);
-  return <div className="hero-console"><div className="pane-bar"><span className="window-dots" aria-hidden="true"><i/><i/><i/></span><span>hello.js</span><span>● LIVE</span></div><div className="hero-code"><p><span className="code-purple">const</span> developer = {'{'}</p><p className="indent">name: <span className="code-green">"Sölvi Hrafn"</span>,</p><p className="indent">curiosity: <span className="code-orange">Infinity</span>,</p><p className="indent">nextStep: <span className="code-green">"Búa eitthvað til"</span></p><p>{'};'}</p><p className="code-comment">// Best að prófa hugmyndina.</p><p><span className="code-purple">function</span> <span className="code-blue">build</span>() {'{'}</p><p className="indent"><span className="code-purple">return</span> <span className="code-green">"Hugmynd → Kóði → Leikur"</span>;</p><p>{'}'}</p></div><div className="hero-terminal"><span className="terminal-prompt">❯</span><p key={run} aria-live="polite">{run ? `Prufa ${run}: Hugmynd → Kóði → Leikur ✓` : 'Tilbúinn að prófa?'}</p><button onClick={() => setRun(n => n + 1)} aria-label="Keyra kynningarprufu">Keyra ↵</button></div><div className="terminal-bottom"><span>9 tungumál og snið</span><span>Endalaus forvitni <i>✳</i></span></div></div>;
+  return <div className="hero-console"><div className="pane-bar"><span className="window-dots" aria-hidden="true"><i/><i/><i/></span><span>hello.js</span><span>● LIVE</span></div><div className="hero-code"><p><span className="code-purple">const</span> developer = {'{'}</p><p className="indent">name: <span className="code-green">"Sölvi Hrafn"</span>,</p><p className="indent">age: <span className="code-orange">{getAge("2006-11-15")}</span>,</p><p className="indent">nextStep: <span className="code-green">"Búa eitthvað til"</span></p><p>{'};'}</p><p className="code-comment">// Best að prófa hugmyndina.</p><p><span className="code-purple">function</span> <span className="code-blue">build</span>() {'{'}</p><p className="indent"><span className="code-purple">return</span> <span className="code-green">"Hugmynd → Kóði → Leikur"</span>;</p><p>{'}'}</p></div><div className="hero-terminal"><span className="terminal-prompt">❯</span><p key={run} aria-live="polite">{run ? `Prufa ${run}: Hugmynd → Kóði → Leikur ✓` : 'Tilbúinn að prófa?'}</p><button onClick={() => setRun(n => n + 1)} aria-label="Keyra kynningarprufu">Keyra ↵</button></div><div className="terminal-bottom"><span>9 tungumál og snið</span><span>Endalaus forvitni <i>✳</i></span></div></div>;
 }
 
 export function LanguageRibbon() {
