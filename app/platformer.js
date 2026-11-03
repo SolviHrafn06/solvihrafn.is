@@ -2,19 +2,31 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useExperience } from './experience';
-import { createGame, drawGame, stepGame, WIDTH, HEIGHT } from './platformer-engine.mjs';
+import { createGame, drawGame, stepGame, WIDTH, HEIGHT, LEVELS } from './platformer-engine.mjs';
+import { appendReplay, inputMask, formatRaceTime } from './platformer-replay.mjs';
+import { Leaderboard, ScoreForm, scoreRequest } from './leaderboard';
 
 function emptyInput() { return { left: false, right: false, jumpPressed: false, jumpHeld: false }; }
 function Platformer({ onClose }) {
-  const canvasRef = useRef(null), inputRef = useRef(emptyInput()), stateRef = useRef(createGame()), pausedRef = useRef(false);
-  const [paused, setPaused] = useState(false);
-  const [hud, setHud] = useState({ stars: 0, deaths: 0, seconds: 0, won: false });
+  const canvasRef = useRef(null), inputRef = useRef(emptyInput()), stateRef = useRef(createGame()), pausedRef = useRef(true);
+  const replayRef=useRef([]),requestRef=useRef(null),readyRef=useRef(false);
+  const [paused, setPaused] = useState(true);
+  const [hud, setHud] = useState({ stars: 0, deaths: 0, timeMs: 0, won: false, level:0 });
+  const [runToken,setRunToken]=useState(null),[runMode,setRunMode]=useState('connecting'),[connectionNote,setConnectionNote]=useState(''),[refresh,setRefresh]=useState(0);
   const { reduced } = useExperience();
   const reducedRef = useRef(reduced);
   useEffect(() => { reducedRef.current = reduced; }, [reduced]);
 
   function pause(value) { inputRef.current = emptyInput(); pausedRef.current = value; setPaused(value); }
-  function restart() { stateRef.current = createGame(); pause(false); canvasRef.current?.focus(); }
+  async function restart() {
+    requestRef.current?.abort();const controller=new AbortController();requestRef.current=controller;
+    readyRef.current=false;stateRef.current=createGame();replayRef.current=[];pause(true);setRunToken(null);setRunMode('connecting');setConnectionNote('Tengi keppnisferð við metatöfluna…');
+    setHud({stars:0,deaths:0,timeMs:0,won:false,level:0});
+    try {const result=await scoreRequest('/api/runs',{},controller.signal);if(controller.signal.aborted)return;setRunToken(result.runToken);setRunMode('online');setConnectionNote('Keppnisferð · kláraðu öll fjögur borðin til að skrá met.');}
+    catch(error){if(error.name==='AbortError')return;setRunMode('practice');setConnectionNote('Metataflan næst ekki. Þú getur spilað æfingaferð; byrjaðu aftur til að reyna tengingu á ný.');}
+    readyRef.current=true;pause(document.hidden);canvasRef.current?.focus();
+  }
+  useEffect(()=>{restart();return()=>requestRef.current?.abort();},[]);
 
   useEffect(() => {
     const canvas = canvasRef.current, ctx = canvas.getContext('2d'), dialog = canvas.closest('dialog');
@@ -25,21 +37,25 @@ function Platformer({ onClose }) {
       lastTime = time;
       if (!pausedRef.current) {
         accumulator += delta;
-        while (accumulator >= 1 / 120) { stepGame(stateRef.current, inputRef.current, 1 / 120); inputRef.current.jumpPressed = false; accumulator -= 1 / 120; }
+        while (accumulator >= 1 / 120) {
+          if(stateRef.current.won){accumulator=0;break;}
+          appendReplay(replayRef.current,inputMask(inputRef.current));
+          stepGame(stateRef.current, inputRef.current, 1 / 120); inputRef.current.jumpPressed = false; accumulator -= 1 / 120;
+        }
       } else accumulator = 0;
       drawGame(ctx, stateRef.current, { paused: pausedRef.current, reduced: reducedRef.current, time });
       const state = stateRef.current;
-      const nextHud = { stars: state.collected.length, deaths: state.deaths, seconds: Math.floor(state.elapsed), won: state.won };
+      const nextHud = { stars: state.collected.length+state.level*3, deaths: state.deaths, timeMs:state.won?Math.round(state.elapsed*1000):Math.floor(state.elapsed*10)*100, won: state.won,level:state.level };
       const key = JSON.stringify(nextHud);
       if (key !== previousHud) { previousHud = key; setHud(nextHud); }
       frame = requestAnimationFrame(tick);
     }
     function keydown(event) {
-      if (event.target.tagName === 'BUTTON') return;
+      if (['BUTTON','INPUT','TEXTAREA','SELECT'].includes(event.target.tagName)) return;
       const key = event.key.toLowerCase();
       if (['arrowleft', 'arrowright', 'arrowup', ' ', 'a', 'd', 'w', 'r', 'p'].includes(key)) event.preventDefault();
       if (key === 'r' && !event.repeat) { restart(); return; }
-      if (key === 'p' && !event.repeat) { pause(!pausedRef.current); return; }
+      if (key === 'p' && !event.repeat && readyRef.current) { pause(!pausedRef.current); return; }
       if (pausedRef.current || stateRef.current.won) return;
       if (key === 'arrowleft' || key === 'a') inputRef.current.left = true;
       if (key === 'arrowright' || key === 'd') inputRef.current.right = true;
@@ -71,12 +87,15 @@ function Platformer({ onClose }) {
   }
   return <>
     <div className="platformer-title"><div><p className="eyebrow">LÍTILL LEIKUR / STÓR FORVITNI</p><h2 id="platformer-title">Stjörnuhlaup<span>✦</span></h2></div><button className="platformer-close" onClick={onClose} aria-label="Loka leik">×</button></div>
-    <p id="platformer-instructions" className="platformer-instructions">Safnaðu stjörnunum þremur og komstu að fánanum. Ef þú dettur heldurðu stjörnunum sem þú fannst.</p>
-    <div className="platformer-hud"><span aria-live="polite">✦ {hud.stars} / 3 stjörnur</span><span>{hud.seconds} s</span><span>{hud.deaths} föll</span></div>
+    <p id="platformer-instructions" className="platformer-instructions">Safnaðu þremur stjörnum í hverju borði og farðu að fánanum. Stjörnurnar haldast ef þú dettur.</p>
+    <p className={`competition-status ${runMode}`} role="status">{connectionNote}</p>
+    <div className="platformer-hud"><span>{hud.level+1} / {LEVELS.length} · {LEVELS[hud.level].name}</span><span aria-live="polite">✦ {hud.stars} / 12</span><span>{formatRaceTime(hud.timeMs)}</span><span>{hud.deaths} föll</span></div>
     <div className="platformer-screen"><canvas ref={canvasRef} width={WIDTH} height={HEIGHT} tabIndex={0} className="platformer-canvas" aria-label="Stjörnuhlaup, platformer. Notaðu örvatakka til að hreyfa þig og bilslá til að hoppa." aria-describedby="platformer-instructions">Vafrinn þinn þarf að styðja Canvas til að spila leikinn.</canvas></div>
     <div className="platformer-controls"><div className="direction-controls">{touchButton('left', 'Til vinstri', '←')}{touchButton('right', 'Til hægri', '→')}</div>{touchButton('jump', 'Hoppa', <>Hoppa <span aria-hidden="true">↑</span></>)}</div>
-    <div className="platformer-toolbar"><p><kbd>←</kbd> <kbd>→</kbd> eða A / D <span>·</span> <kbd>bilslá</kbd> hoppar <span>·</span> P gerir hlé</p><div>{!hud.won && <button onClick={() => { pause(!paused); canvasRef.current?.focus(); }}>{paused ? 'Halda áfram' : 'Gera hlé'}</button>}<button onClick={restart}>{hud.won ? 'Spila aftur ↺' : 'Byrja aftur ↺'}</button></div></div>
-    <p className="platformer-win" role="status">{hud.won ? `Vel gert! Þú náðir öllum stjörnunum á ${hud.seconds} sekúndum.` : paused ? 'Leikurinn er í hléi.' : 'Stutt hopp: slepptu bilslánni fyrr. Lengra hopp: haltu henni inni.'}</p>
+    <div className="platformer-toolbar"><p><kbd>←</kbd> <kbd>→</kbd> eða A / D <span>·</span> <kbd>bilslá</kbd> hoppar <span>·</span> P gerir hlé</p><div>{!hud.won && <button disabled={runMode==='connecting'} onClick={() => { pause(!paused); canvasRef.current?.focus(); }}>{paused ? 'Halda áfram' : 'Gera hlé'}</button>}<button onClick={restart}>{hud.won ? 'Spila aftur ↺' : 'Byrja aftur ↺'}</button></div></div>
+    <p className="platformer-win" role="status">{hud.won ? `Vel gert! Tólf stjörnur á ${formatRaceTime(hud.timeMs)}.` : runMode==='connecting'?'Undirbý keppnisferð…':paused ? 'Leikurinn er í hléi.' : 'Stutt hopp: slepptu bilslánni fyrr. Lengra hopp: haltu henni inni.'}</p>
+    {hud.won&&<ScoreForm token={runToken} replay={replayRef.current} timeMs={hud.timeMs} onSaved={()=>setRefresh(n=>n+1)}/>}
+    <Leaderboard refresh={refresh}/>
   </>;
 }
 

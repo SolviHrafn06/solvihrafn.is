@@ -38,8 +38,11 @@ Leikjahlutinn vísar á https://solvihrafn.itch.io/.
 
 „Prófa leik“ við itch.io-hlekkinn opnar lítinn Canvas-platformer með CRT-áferð.
 Örvar eða A/D hreyfa leikmann, bilslá/W/upp ör hoppar, P gerir hlé og R byrjar aftur.
-Snertihnappar eru einnig í boði. Safna þarf þremur stjörnum og komast að fánanum.
+Snertihnappar eru einnig í boði. Fjögur borð hafa ólíka palla og liti; safna þarf þremur stjörnum á hverju borði og komast að fánanum. Tími og föll teljast saman yfir öll borðin; hlé stöðvar klukkuna.
 `app/platformer.js` sér um leikglugga og stýringu; `app/platformer-engine.mjs` um eðlisfræði og teikningu; `app/platformer.css` um útlit og CRT-áferð.
+
+Sameiginlega metataflan notar sér Sites-þjónustu, skilgreinda í `app/leaderboard.js`. Vefsíðan og lénið eru áfram á GitHub Pages. Hver keppnisferð fær einnota auðkenni og sendir þjappaða upptöku af tökkum. Þjónninn spilar ferðina aftur í sömu eðlisfræði, staðfestir öll fjögur borðin og reiknar tímann sjálfur. Besti tími hvers nafns birtist á topp 20. Þetta hindrar tilbúna innsenda tíma en er ekki vörn gegn vélmennum.
+Nöfn eru síuð á þjóninum með einkalista sem er ekki í þessu opinbera safni. Nöfn og tímar eru opinber; engin innskráning er nauðsynleg. Ferðir yfir tíu mínútur fara ekki á metatöfluna og auðkenni renna út eftir 30 mínútur. Ef þjónustan næst ekki er hægt að spila æfingaferð án mets.
 
 ## Birting á GitHub Pages
 
