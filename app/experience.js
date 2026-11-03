@@ -6,6 +6,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { motion, MotionConfig, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform } from 'motion/react';
 
 const Experience = createContext({});
+export function useExperience() { return useContext(Experience); }
 const colors = [
   { id: 'orange', value: '#ee754c', name: '01 — Appelsínugulur' },
   { id: 'blue', value: '#658ac0', name: '02 — Blár' },
@@ -50,7 +51,8 @@ export function SiteHeader() {
   return <><a className="skip" href="#main">Fara í efni</a><header className="header wrap">
     <Link href="/" className="brand" aria-label="Sölvi Hrafn, forsíða">sölvi hrafn<span className="brand-dot">.</span></Link>
     <nav aria-label="Aðalvalmynd">
-      <Link href={path === '/' ? '/#um' : '/'}>{path === '/' ? 'Um síðuna' : 'Forsíða'}</Link>
+      <Link href={path === '/' ? '/#profustofa' : '/'}>{path === '/' ? 'Prófanir' : 'Forsíða'}</Link>
+      <Link href="/#leikir">Leikir</Link>
       <Link href="/ferilskra/" aria-current={path.startsWith('/ferilskra') ? 'page' : undefined}>Ferilskrá</Link>
       <a href="https://github.com/SolviHrafn06" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
     </nav>

@@ -2,7 +2,19 @@
   "name": "solvihrafn-is",
   "version": "2.0.0",
   "private": true,
-  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
-  "dependencies": { "next": "16.4.4", "react": "^19.2.0", "react-dom": "^19.2.0", "motion": "14.9.0" },
+  "scripts": {
+    "dev": "next dev",
+    "prebuild": "node scripts/prepare-vendor.mjs",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "marked": "^18.1.3",
+    "motion": "14.9.0",
+    "next": "16.4.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "sql.js": "^1.15.2"
+  },
   "packageManager": "pnpm@10.28.2"
 }

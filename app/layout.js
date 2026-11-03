@@ -1,11 +1,12 @@
 import './globals.css';
 import './enhancements.css';
+import './showcase.css';
 import { SiteExperience } from './experience';
 
 export const metadata = {
   metadataBase: new URL('https://solvihrafn.is'),
-  title: { default: 'Sölvi Hrafn — Hugmyndir byrja hér.', template: '%s — Sölvi Hrafn' },
-  description: 'Mitt eigið horn á internetinu. Hugmyndir, tilraunir og allt þar á milli.',
+  title: { default: 'Sölvi Hrafn — Kóði sem þú getur prófað.', template: '%s — Sölvi Hrafn' },
+  description: 'Forritun, leikjaþróun og gagnvirkar prufur. Prófaðu JavaScript, Python, SQL, HTML, CSS, Markdown og reiknilíkön með Java, C# og C++ kóða.',
   icons: { icon: '/favicon.svg' },
 };
 

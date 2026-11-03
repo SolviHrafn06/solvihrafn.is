@@ -24,6 +24,16 @@ Opnaðu http://localhost:3000. Breytingar sjást jafnóðum á meðan þróunar�
 
 Litaval og hreyfirofi eru vistuð í vafranum. Síðan virðir kerfisstillinguna fyrir minni hreyfingar.
 
+## Prófanir á forsíðu
+
+Prófustofan inniheldur JavaScript, HTML, CSS, Markdown, Python, SQL, Java, C# og C++.
+JavaScript keyrir í sér Web Worker og stöðvast eftir tvær sekúndur ef keyrslu lýkur ekki.
+Python notar Pyodide 314.0.7, sótt af jsDelivr við fyrstu keyrslu, og keyrir í module worker.
+SQL notar SQLite/sql.js með nýjum sýnigagnagrunni við hverja keyrslu; WASM-skrár eru afritaðar sjálfkrafa í prebuild.
+HTML, CSS og Markdown birtast í einangruðum iframe með lokuðum skriftum og nettilföngum.
+Java, C# og C++ sýna gagnvirk JavaScript-reiknilíkön ásamt samsvarandi, niðurhalanlegum frumkóða. Þau þýða ekki almennan Java/C#/C++ kóða í vafranum.
+Leikjahlutinn vísar á https://solvihrafn.itch.io/.
+
 ## Birting
 
 GitHub Actions byggir Next.js sjálfkrafa og birtir `out/` á GitHub Pages þegar breyting er send á `main`.
