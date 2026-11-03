@@ -49,6 +49,8 @@ Nöfn eru síuð á þjóninum með einkalista sem er ekki í þessu opinbera sa
 GitHub Actions byggir Next.js sjálfkrafa og birtir `out/` á GitHub Pages þegar breyting er send á `main`.
 Slóðirnar eru https://solvihrafn.is/ og https://solvihrafn.is/ferilskra/.
 
+„Flakkari“ í efstu valmynd opnar `/Flakkari/`, statíska tilvísun í `public/Flakkari/index.html` á Jellyfin-þjóninn. Þetta er flýtileið; Jellyfin keyrir áfram á eigin slóð. Til að halda Jellyfin undir eigin léni þarf reverse proxy á viðeigandi hýsingu.
+
 `pnpm build` býr til statískar síður í `out/`; mappan er ekki geymd í Git.
 GitHub Pages notar **GitHub Actions** sem birtingaruppsprettu.
 `public/CNAME` varðveitir eigið lén í útflutningnum.
