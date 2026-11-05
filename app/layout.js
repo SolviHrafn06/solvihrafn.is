@@ -6,7 +6,7 @@ import { SiteExperience } from './experience';
 
 export const metadata = {
   metadataBase: new URL('https://solvihrafn.is'),
-  title: { default: 'Sölvi Hrafn — Kóði sem þú getur prófað.', template: '%s — Sölvi Hrafn' },
+  title: { default: 'Sölvi Hrafn.is', template: '%s — Sölvi Hrafn' },
   description: 'Forritun, leikjaþróun og gagnvirkar prufur. Prófaðu JavaScript, Python, SQL, HTML, CSS, Markdown og reiknilíkön með Java, C# og C++ kóða.',
   icons: { icon: '/favicon.svg' },
 };
