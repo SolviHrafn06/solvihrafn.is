@@ -14,62 +14,143 @@ from math import cos, floor, sin, tan
 
 class World:
     SIZE = 48
+    CHUNK_SIZE = 16
+    CHUNK_CACHE_SIZE = 64
     PLAYER_RADIUS = 0.29
     PLAYER_HEIGHT = 1.75
 
     def __init__(self, seed=None):
         self.seed = random.randrange(2**32) if seed is None else seed
-        self.blocks = {}
         rng = random.Random(self.seed)
-        phases = [rng.uniform(0, math.tau) for _ in range(5)]
-        heights = {}
+        self.phases = tuple(rng.uniform(0, math.tau) for _ in range(5))
+        self._chunks = {}
+        self._trees = {}
+        self._edits = {}
         center = self.SIZE // 2
-        for z in range(self.SIZE):
-            for x in range(self.SIZE):
-                height = round(
-                    6.5
-                    + 1.6 * math.sin(x * 0.14 + phases[0])
-                    + 1.3 * math.cos(z * 0.17 + phases[1])
-                    + 1.5 * math.sin((x + z) * 0.11 + phases[2])
-                    + 0.55 * math.sin(x * 0.39 + phases[3]) * math.cos(z * 0.31 + phases[4])
-                )
-                heights[x, z] = height
-                beach = height <= 4
-                self.blocks[x, 0, z] = 7
-                for y in range(1, height):
-                    self.blocks[x, y, z] = (4 if beach else 2) if height - y < 3 else 3
-                self.blocks[x, height, z] = 4 if beach else 1
+        self.spawn = (center + 0.5, float(self.terrain_height(center, center) + 1), center + 0.5)
+        if self.SIZE > 6:
+            self._plant_trees(rng, center)
 
+    def terrain_height(self, x, z):
+        if not (0 <= x < self.SIZE and 0 <= z < self.SIZE):
+            return -1
+        p0, p1, p2, p3, p4 = self.phases
+        return round(
+            6.5
+            + 1.6 * math.sin(x * 0.14 + p0)
+            + 1.3 * math.cos(z * 0.17 + p1)
+            + 1.5 * math.sin((x + z) * 0.11 + p2)
+            + 0.55 * math.sin(x * 0.39 + p3) * math.cos(z * 0.31 + p4)
+        )
+
+    def _plant_trees(self, rng, center):
+        # Generate the legacy seeded trees once, without building the entire terrain.
         trees = []
         for _ in range(100):
             x = rng.randrange(3, self.SIZE - 3)
             z = rng.randrange(3, self.SIZE - 3)
+            height = self.terrain_height(x, z)
             if (
-                heights[x, z] <= 4
+                height <= 4
                 or (x - center) ** 2 + (z - center) ** 2 < 25
                 or any((x - tx) ** 2 + (z - tz) ** 2 < 30 for tx, tz in trees)
             ):
                 continue
             trees.append((x, z))
-            top = heights[x, z] + rng.randrange(3, 5)
+            top = height + rng.randrange(3, 5)
             for y in range(top - 1, top + 2):
                 radius = 1 if y > top else 2
                 for dz in range(-radius, radius + 1):
                     for dx in range(-radius, radius + 1):
                         if abs(dx) + abs(dz) <= radius + 1:
-                            self.blocks.setdefault((x + dx, y, z + dz), 6)
-            for y in range(heights[x, z] + 1, top + 1):
-                self.blocks[x, y, z] = 5
-        self.spawn = (center + 0.5, float(heights[center, center] + 1), center + 0.5)
+                            ix, iz = x + dx, z + dz
+                            key = (ix // self.CHUNK_SIZE, iz // self.CHUNK_SIZE)
+                            self._trees.setdefault(key, {}).setdefault((ix, y, iz), 6)
+            key = (x // self.CHUNK_SIZE, z // self.CHUNK_SIZE)
+            tree = self._trees.setdefault(key, {})
+            for y in range(height + 1, top + 1):
+                tree[x, y, z] = 5
+
+    def has_chunk(self, cx, cz):
+        last = (self.SIZE - 1) // self.CHUNK_SIZE
+        return 0 <= cx <= last and 0 <= cz <= last or (cx, cz) in self._edits
+
+    def chunk(self, cx, cz):
+        key = (cx, cz)
+        blocks = self._chunks.pop(key, None)
+        if blocks is not None:
+            self._chunks[key] = blocks
+            return blocks
+        if not self.has_chunk(cx, cz):
+            return {}
+
+        blocks = {}
+        size = self.CHUNK_SIZE
+        for z in range(max(0, cz * size), min(self.SIZE, (cz + 1) * size)):
+            for x in range(max(0, cx * size), min(self.SIZE, (cx + 1) * size)):
+                height = self.terrain_height(x, z)
+                beach = height <= 4
+                blocks[x, 0, z] = 7
+                for y in range(1, height):
+                    blocks[x, y, z] = (4 if beach else 2) if height - y < 3 else 3
+                blocks[x, height, z] = 4 if beach else 1
+        for position, block in self._trees.get(key, {}).items():
+            blocks.setdefault(position, block)
+        for position, block in self._edits.get(key, {}).items():
+            if block:
+                blocks[position] = block
+            else:
+                blocks.pop(position, None)
+        self._chunks[key] = blocks
+        if len(self._chunks) > self.CHUNK_CACHE_SIZE:
+            del self._chunks[next(iter(self._chunks))]
+        return blocks
+
+    def iter_chunk(self, cx, cz):
+        return self.chunk(cx, cz).items()
+
+    def _natural_block(self, position, key):
+        x, y, z = position
+        if 0 <= y <= 11:
+            height = self.terrain_height(x, z)
+            if y <= height:
+                if y == 0:
+                    return 7
+                if y == height:
+                    return 4 if height <= 4 else 1
+                if height - y < 3:
+                    return 4 if height <= 4 else 2
+                return 3
+        return self._trees.get(key, {}).get(position, 0)
 
     def get(self, x, y, z):
-        return self.blocks.get((x, y, z), 0)
+        position = (x, y, z)
+        key = (x // self.CHUNK_SIZE, z // self.CHUNK_SIZE)
+        blocks = self._chunks.get(key)
+        if blocks is not None:
+            return blocks.get(position, 0)
+        edits = self._edits.get(key)
+        if edits is not None and position in edits:
+            return edits[position]
+        return self._natural_block(position, key)
 
     def set(self, x, y, z, block):
-        if block:
-            self.blocks[x, y, z] = block
+        position = (x, y, z)
+        key = (x // self.CHUNK_SIZE, z // self.CHUNK_SIZE)
+        if block == self._natural_block(position, key):
+            edits = self._edits.get(key)
+            if edits is not None:
+                edits.pop(position, None)
+                if not edits:
+                    del self._edits[key]
         else:
-            self.blocks.pop((x, y, z), None)
+            self._edits.setdefault(key, {})[position] = block
+        blocks = self._chunks.get(key)
+        if blocks is not None:
+            if block:
+                blocks[position] = block
+            else:
+                blocks.pop(position, None)
 
     def collides(self, x, y, z):
         r = self.PLAYER_RADIUS
@@ -77,7 +158,7 @@ class World:
         for bx in range(math.floor(x - r + epsilon), math.floor(x + r - epsilon) + 1):
             for by in range(math.floor(y + epsilon), math.floor(y + self.PLAYER_HEIGHT - epsilon) + 1):
                 for bz in range(math.floor(z - r + epsilon), math.floor(z + r - epsilon) + 1):
-                    if (bx, by, bz) in self.blocks:
+                    if self.get(bx, by, bz):
                         return True
         return False
 
@@ -98,7 +179,7 @@ class World:
         distance = 0
         while distance <= reach:
             location = tuple(cell)
-            if location in self.blocks:
+            if self.get(*location):
                 return location, previous
             previous = location
             axis = min(range(3), key=crossing.__getitem__)
@@ -108,7 +189,150 @@ class World:
         return None, None
 
 
-# Each row gives an outward normal and the four corners of a cube face.
+class DistantTerrain:
+    """Draw an adaptive heightfield behind the exact editable voxel mesh."""
+
+    MIN_TILE = 4
+    ANGULAR_TILE = 0.33
+    CACHE_LIMIT = 4096
+
+    def __init__(self):
+        self.world = None
+        self.tiles = {}
+        self.palette = {}
+        haze = (177, 204, 198)
+        for sand, base in ((False, (141, 166, 88)), (True, (219, 192, 138))):
+            for variation in range(3):
+                for band in range(6):
+                    amount = 0.06 + band * 0.10
+                    rgb = [round((level + (variation - 1) * 6) * (1 - amount) + fog * amount)
+                           for level, fog in zip(base, haze)]
+                    self.palette[sand, variation, band] = "#%02x%02x%02x" % tuple(rgb)
+
+    def _tile(self, world, x0, z0, x1, z1):
+        key = (x0, z0, x1, z1)
+        tile = self.tiles.get(key)
+        if tile is not None:
+            return tile
+        height = world.terrain_height
+        last = world.SIZE - 1
+        a = (x0, height(x0, z0) + 1, z0)
+        b = (x1, height(min(x1, last), z0) + 1, z0)
+        c = (x1, height(min(x1, last), min(z1, last)) + 1, z1)
+        d = (x0, height(x0, min(z1, last)) + 1, z1)
+        sand = height((x0 + x1) // 2, (z0 + z1) // 2) <= 4
+        tile = (a, b, c, d, sand, ((x0 * 73471) ^ (z0 * 23993)) % 3)
+        if len(self.tiles) >= self.CACHE_LIMIT:
+            self.tiles.clear()
+        self.tiles[key] = tile
+        return tile
+
+    def draw(self, context, path_type, world, eye_x, eye_z, near_bounds, radius, box_visible, project):
+        if radius <= 0 or world.SIZE <= 0:
+            return
+        if self.world is not world:
+            self.world = world
+            self.tiles.clear()
+
+        world_size = world.SIZE
+        root_size = 1 << (world_size - 1).bit_length()
+        near_x0, near_z0, near_x1, near_z1 = near_bounds
+        radius_squared = radius * radius
+        tile_ratio_squared = self.ANGULAR_TILE ** 2
+        edge_resolution = max(self.MIN_TILE, radius / 18)
+        pending = []
+        color = None
+
+        def flush():
+            if not pending:
+                return
+            context.fillStyle = color
+            if path_type is not None:
+                context.fill(path_type.new("".join(
+                    "M" + " ".join(f"{x:.1f},{y:.1f}" for x, y in polygon) + "Z"
+                    for polygon in pending
+                )))
+            else:
+                context.beginPath()
+                for polygon in pending:
+                    context.moveTo(*polygon[0])
+                    for point in polygon[1:]:
+                        context.lineTo(*point)
+                    context.closePath()
+                context.fill()
+            pending.clear()
+
+        def emit(points):
+            polygon = project(points)
+            if not polygon:
+                return
+            # A common winding keeps adjoining tile skirts and tops opaque when batched.
+            px, py = polygon[-1]
+            area = 0.0
+            for x, y in polygon:
+                area += px * y - py * x
+                px, py = x, y
+            pending.append(polygon if area >= 0 else polygon[::-1])
+
+        def visit(x0, z0, size):
+            nonlocal color
+            if x0 >= world_size or z0 >= world_size:
+                return
+            x1, z1 = min(x0 + size, world_size), min(z0 + size, world_size)
+            if near_x0 <= x0 and x1 <= near_x1 and near_z0 <= z0 and z1 <= near_z1:
+                return
+
+            dx = max(x0 - eye_x, eye_x - x1, 0)
+            dz = max(z0 - eye_z, eye_z - z1, 0)
+            distance_squared = dx * dx + dz * dz
+            if distance_squared > radius_squared or not box_visible(x0, 0, z0, x1, 16, z1):
+                return
+
+            intersects_near = x0 < near_x1 and x1 > near_x0 and z0 < near_z1 and z1 > near_z0
+            crosses_edge = False
+            if size > edge_resolution:
+                far_dx = max(abs(x0 - eye_x), abs(x1 - eye_x))
+                far_dz = max(abs(z0 - eye_z), abs(z1 - eye_z))
+                crosses_edge = far_dx ** 2 + far_dz ** 2 > radius_squared
+            if size > self.MIN_TILE and (
+                intersects_near or crosses_edge or size * size > distance_squared * tile_ratio_squared
+            ):
+                half = size // 2
+                mid_x, mid_z = x0 + half, z0 + half
+                xs = (mid_x, x0) if eye_x < mid_x else (x0, mid_x)
+                zs = (mid_z, z0) if eye_z < mid_z else (z0, mid_z)
+                # A ray crosses each split plane at most once. Paint its far half first.
+                for draw_x in xs:
+                    for draw_z in zs:
+                        visit(draw_x, draw_z, half)
+                return
+
+            cx, cz = (x0 + x1) * 0.5 - eye_x, (z0 + z1) * 0.5 - eye_z
+            center_squared = cx * cx + cz * cz
+            if center_squared > radius_squared or intersects_near:
+                return
+            a, b, c, d, sand, variation = self._tile(world, x0, z0, x1, z1)
+            band = min(5, int(center_squared / radius_squared * 6))
+            tile_color = self.palette[sand, variation, band]
+            if tile_color != color:
+                flush()
+                color = tile_color
+
+            # Facing walls close gaps where adjacent tiles use different detail levels.
+            if eye_x < x0:
+                emit(((x0, 0, z0), a, d, (x0, 0, z1)))
+            elif eye_x > x1:
+                emit(((x1, 0, z1), c, b, (x1, 0, z0)))
+            if eye_z < z0:
+                emit(((x1, 0, z0), b, a, (x0, 0, z0)))
+            elif eye_z > z1:
+                emit(((x0, 0, z1), d, c, (x1, 0, z1)))
+            emit((a, b, c, d))
+
+        visit(0, 0, root_size)
+        flush()
+
+
 VOXEL_FACES = (
     ((-1, 0, 0), ((0, 0, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1))),
     ((1, 0, 0), ((1, 0, 1), (1, 1, 1), (1, 1, 0), (1, 0, 0))),
@@ -129,182 +353,255 @@ VOXEL_COLORS = {
 }
 
 
-class VoxelRenderer:
-    CHUNK_SIZE = 6
-    DISTANCE = 20
+class CameraProjection:
     NEAR = 0.075
 
+    def __init__(self, x, y, z, yaw, pitch, width, height):
+        self.x, self.y, self.z = x, y, z
+        self.width, self.height = width, height
+        self.center_x, self.center_y = width / 2, height / 2
+        self.focal = max(self.center_x / tan(0.76), self.center_y / tan(0.57), 1)
+        self.horizontal = (self.center_x + 2) / self.focal
+        self.vertical = (self.center_y + 2) / self.focal
+        self.cy, self.sy = cos(yaw), sin(yaw)
+        self.cp, self.sp = cos(pitch), sin(pitch)
+        right = (self.cy, 0, -self.sy)
+        up = (-self.sy * self.sp, self.cp, -self.cy * self.sp)
+        depth = (self.sy * self.cp, self.sp, self.cy * self.cp)
+        planes = [(*depth, self.NEAR)]
+        for direction, span in ((right, self.horizontal), (up, self.vertical)):
+            for sign in (-1, 1):
+                planes.append((*(a * span + b * sign for a, b in zip(depth, direction)), 0))
+        self.planes = [(nx, ny, nz, abs(nx), abs(ny), abs(nz), limit)
+                       for nx, ny, nz, limit in planes]
+
+    def box_visible(self, x0, y0, z0, x1, y1, z1):
+        hx, hy, hz = (x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2
+        x, y, z = x0 + hx - self.x, y0 + hy - self.y, z0 + hz - self.z
+        for nx, ny, nz, ax, ay, az, limit in self.planes:
+            if nx * x + ny * y + nz * z + ax * hx + ay * hy + az * hz < limit:
+                return False
+        return True
+
+    def view_point(self, point):
+        x, y, z = point
+        x, y, z = x - self.x, y - self.y, z - self.z
+        ahead = x * self.sy + z * self.cy
+        return (x * self.cy - z * self.sy, y * self.cp - ahead * self.sp,
+                y * self.sp + ahead * self.cp)
+
+    def project(self, points):
+        return self.project_view([self.view_point(point) for point in points])
+
+    def project_view(self, vertices):
+        if any(point[2] < self.NEAR for point in vertices):
+            clipped = []
+            previous = vertices[-1]
+            for current in vertices:
+                if (previous[2] >= self.NEAR) != (current[2] >= self.NEAR):
+                    fraction = (self.NEAR - previous[2]) / (current[2] - previous[2])
+                    clipped.append((previous[0] + (current[0] - previous[0]) * fraction,
+                                    previous[1] + (current[1] - previous[1]) * fraction, self.NEAR))
+                if current[2] >= self.NEAR:
+                    clipped.append(current)
+                previous = current
+            if len(clipped) < 3:
+                return None
+            vertices = clipped
+        return [(self.center_x + x * self.focal / depth, self.center_y - y * self.focal / depth)
+                for x, y, depth in vertices]
+
+
+class VoxelRenderer:
+    CHUNK_SIZE = 8
+    CHUNK_CACHE_SIZE = 192
+    DISTANCE = 20
+    LOD_THRESHOLD = 24
+
     def __init__(self, canvas, context=None):
-        self.canvas = canvas
-        self.context = canvas.getContext('2d') if context is None else context
+        self.context = canvas.getContext("2d") if context is None else context
         try:
             from js import Path2D
         except ImportError:
             Path2D = None
         self.path_type = Path2D
         self.world = None
-        self.chunks = {}
+        self.tiles = {}
+        self.distant = DistantTerrain()
         self.frame = None
-        self.sky = '#a9d8df'
+        self.sky = "#a9d8df"
         self.sky_size = None
         self.colors = {}
         for block, (side, top) in VOXEL_COLORS.items():
-            for face_index, light in enumerate((0.90, 0.73, 0.66, 1.0, 0.81, 0.96)):
-                rgb = top if face_index == 3 else side
-                for variant in range(5):
-                    shade = light * (0.94 + variant * 0.028)
-                    self.colors[block, face_index, variant] = '#%02x%02x%02x' % tuple(
+            for index, light in enumerate((0.90, 0.73, 0.66, 1.0, 0.81, 0.96)):
+                rgb = top if index == 3 else side
+                for variant in range(3):
+                    shade = light * (0.95 + variant * 0.045)
+                    self.colors[block, index, variant] = "#%02x%02x%02x" % tuple(
                         round(channel * shade) for channel in rgb
                     )
 
     def rebuild(self, world):
         self.world = world
-        self.chunks.clear()
-        for x, y, z in world.blocks:
-            self._cache_block(world, x, y, z)
+        self.tiles.clear()
         self.frame = None
 
     def update_block(self, world, x, y, z):
         if self.world is not world:
             self.rebuild(world)
             return
-        self._cache_block(world, x, y, z)
-        for (nx, ny, nz), _ in VOXEL_FACES:
-            self._cache_block(world, x + nx, y + ny, z + nz)
+        size = self.CHUNK_SIZE
+        for offset_x, offset_z in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
+            self.tiles.pop(((x + offset_x) // size, (z + offset_z) // size), None)
         self.frame = None
 
-    def _cache_block(self, world, x, y, z):
-        position = (x, y, z)
-        key = (x // self.CHUNK_SIZE, z // self.CHUNK_SIZE)
-        block = world.get(x, y, z)
-        faces = []
-        if block:
-            variant = ((x * 73471) ^ (y * 57803) ^ (z * 23993)) % 5
+    def tile(self, world, tx, tz):
+        key = (tx, tz)
+        if key in self.tiles:
+            tile = self.tiles.pop(key)
+            self.tiles[key] = tile
+            return tile
+        size, storage = self.CHUNK_SIZE, world.CHUNK_SIZE
+        x0, z0 = tx * size, tz * size
+        cx, cz = x0 // storage, z0 // storage
+        blocks = world.chunk(cx, cz)
+        faces_by_block = []
+        low, high = math.inf, -math.inf
+        for (x, y, z), block in blocks.items():
+            if not (x0 <= x < x0 + size and z0 <= z < z0 + size):
+                continue
+            faces = []
+            variant = ((x * 73471) ^ (y * 57803) ^ (z * 23993)) % 3
             for index, ((nx, ny, nz), corners) in enumerate(VOXEL_FACES):
-                if not world.get(x + nx, y + ny, z + nz):
+                ix, iz = x + nx, z + nz
+                if ix // storage == cx and iz // storage == cz:
+                    neighbor = blocks.get((ix, y + ny, iz), 0)
+                else:
+                    neighbor = world.get(ix, y + ny, iz)
+                if not neighbor:
                     vertices = tuple((x + vx, y + vy, z + vz) for vx, vy, vz in corners)
-                    color = self.colors[block, index, variant]
-                    faces.append((nx, ny, nz, vertices, color))
-        if faces:
-            self.chunks.setdefault(key, {})[position] = faces
-        elif key in self.chunks:
-            self.chunks[key].pop(position, None)
+                    faces.append((nx, ny, nz, vertices, self.colors[block, index, variant]))
+            if faces:
+                faces_by_block.append((x, y, z, faces))
+                low, high = min(low, y), max(high, y + 1)
+        tile = (low, high, faces_by_block) if faces_by_block else None
+        self.tiles[key] = tile
+        if len(self.tiles) > self.CHUNK_CACHE_SIZE:
+            del self.tiles[next(iter(self.tiles))]
+        return tile
 
     def draw(self, world, x, y, z, yaw, pitch, width, height, target=None):
         if self.world is not world:
             self.rebuild(world)
-        frame = (x, y, z, yaw, pitch, width, height, target)
+        frame = (x, y, z, yaw, pitch, width, height, target, self.DISTANCE)
         if frame == self.frame:
             return
         self.frame = frame
-        cy, sy = cos(yaw), sin(yaw)
-        cp, sp = cos(pitch), sin(pitch)
-        half_width, half_height = width * 0.5, height * 0.5
-        focal = max(half_width / tan(0.76), half_height / tan(0.57), 1)
-        horizontal = (half_width + 2) / focal
-        vertical = (half_height + 2) / focal
-        radius = self.DISTANCE
-        min_cx, max_cx = int((x - radius) // self.CHUNK_SIZE), int((x + radius) // self.CHUNK_SIZE)
-        min_cz, max_cz = int((z - radius) // self.CHUNK_SIZE), int((z + radius) // self.CHUNK_SIZE)
-        near = self.NEAR
-        cell_x, cell_y, cell_z = floor(x), floor(y), floor(z)
+        camera = CameraProjection(x, y, z, yaw, pitch, width, height)
+        radius = max(1.0, self.DISTANCE)
+        self.paint_sky(width, height)
+        if radius > self.LOD_THRESHOLD:
+            tx, tz = floor(x / self.CHUNK_SIZE), floor(z / self.CHUNK_SIZE)
+            min_x, max_x, min_z, max_z = tx - 1, tx + 1, tz - 1, tz + 1
+            size = self.CHUNK_SIZE
+            self.distant.draw(self.context, self.path_type, world, x, z,
+                              (min_x * size, min_z * size, (max_x + 1) * size, (max_z + 1) * size),
+                              radius, camera.box_visible, camera.project)
+        else:
+            size = self.CHUNK_SIZE
+            min_x, max_x = floor((x - radius) / size), floor((x + radius) / size)
+            min_z, max_z = floor((z - radius) / size), floor((z + radius) / size)
+        self.draw_voxels(world, camera, min_x, min_z, max_x, max_z, radius, target)
 
-        # Reuse transformed grid corners across neighboring faces.
+    def paint_sky(self, width, height):
+        context = self.context
+        size = width, height
+        if self.sky_size != size and hasattr(context, "createLinearGradient"):
+            sky = context.createLinearGradient(0, 0, 0, height)
+            sky.addColorStop(0, "#81b5c6")
+            sky.addColorStop(0.58, "#d1e6dd")
+            sky.addColorStop(1, "#f1ecce")
+            self.sky, self.sky_size = sky, size
+        context.fillStyle = self.sky
+        context.fillRect(0, 0, width, height)
+
+    def draw_voxels(self, world, camera, min_x, min_z, max_x, max_z, radius, target):
+        x, y, z = camera.x, camera.y, camera.z
+        cell_x, cell_y, cell_z = floor(x), floor(y), floor(z)
+        size = self.CHUNK_SIZE
+        radius_squared = radius * radius
         transformed = {}
-        visible = []
-        for chunk_x in range(min_cx, max_cx + 1):
-            for chunk_z in range(min_cz, max_cz + 1):
-                chunk = self.chunks.get((chunk_x, chunk_z), {})
-                for position, faces in chunk.items():
-                    bx, by, bz = position
+        buckets = {}
+        outline = []
+        sy, cy, sp, cp = camera.sy, camera.cy, camera.sp, camera.cp
+        horizontal, vertical = camera.horizontal, camera.vertical
+        transform, project_view = camera.view_point, camera.project_view
+        for tx in range(min_x, max_x + 1):
+            x0 = tx * size
+            for tz in range(min_z, max_z + 1):
+                z0 = tz * size
+                tile = self.tile(world, tx, tz)
+                if tile is None:
+                    continue
+                low, high, blocks = tile
+                if not camera.box_visible(x0, low, z0, x0 + size, high, z0 + size):
+                    continue
+                for bx, by, bz, faces in blocks:
                     dx, dy, dz = bx + 0.5 - x, by + 0.5 - y, bz + 0.5 - z
-                    if dx * dx + dy * dy + dz * dz > radius * radius:
+                    if dx * dx + dy * dy + dz * dz > radius_squared:
                         continue
-                    right = dx * cy - dz * sy
-                    forward = dx * sy + dz * cy
-                    up = dy * cp - forward * sp
-                    depth = dy * sp + forward * cp
+                    ahead = dx * sy + dz * cy
+                    right, up = dx * cy - dz * sy, dy * cp - ahead * sp
+                    depth = dy * sp + ahead * cp
                     if (depth <= -1 or abs(right) > (depth + 1) * horizontal + 1
                             or abs(up) > (depth + 1) * vertical + 1):
                         continue
-                    crossings = abs(bx - cell_x) + abs(by - cell_y) + abs(bz - cell_z)
+                    rank = abs(bx - cell_x) + abs(by - cell_y) + abs(bz - cell_z)
+                    selected = (bx, by, bz) == target
                     for nx, ny, nz, vertices, color in faces:
                         if dx * nx + dy * ny + dz * nz >= -0.5:
                             continue
-                        polygon = []
+                        view = []
                         for vertex in vertices:
                             point = transformed.get(vertex)
                             if point is None:
-                                vx, vy, vz = vertex
-                                vx, vy, vz = vx - x, vy - y, vz - z
-                                vz_forward = vx * sy + vz * cy
-                                point = (vx * cy - vz * sy,
-                                         vy * cp - vz_forward * sp,
-                                         vy * sp + vz_forward * cp)
-                                transformed[vertex] = point
-                            polygon.append(point)
-                        if any(point[2] < near for point in polygon):
-                            polygon = self._clip_near(polygon, near)
-                            if len(polygon) < 3:
-                                continue
-                        projected = []
-                        for rx, ry, rz in polygon:
-                            scale = focal / rz
-                            projected.append((half_width + rx * scale, half_height - ry * scale))
-                        visible.append((crossings, projected, color, position == target))
+                                point = transformed[vertex] = transform(vertex)
+                            view.append(point)
+                        polygon = project_view(view)
+                        if polygon is None:
+                            continue
+                        buckets.setdefault(rank, {}).setdefault(color, []).append(polygon)
+                        if selected:
+                            outline.append(polygon)
+        target_rank = sum(abs(coord - cell) for coord, cell in zip(target, (cell_x, cell_y, cell_z))) if target else -1
+        for rank in sorted(buckets, reverse=True):
+            # A viewing ray visits at most one voxel per grid crossing count.
+            # Polygons in the same bucket can share a fill without changing occlusion.
+            for color, polygons in buckets[rank].items():
+                self.paint_polygons(polygons, color)
+            if outline and rank == target_rank:
+                self.context.strokeStyle = "#fff0c7"
+                self.context.lineWidth = max(1.5, camera.width / 480)
+                self.context.lineJoin = "round"
+                self.paint_polygons(outline)
 
-        # Each ray crosses progressively more grid planes, so the voxel with more
-        # crossings is farther wherever its projection overlaps a nearer voxel.
-        visible.sort(key=lambda face: face[0], reverse=True)
+    def paint_polygons(self, polygons, color=None):
         context = self.context
-        size = (width, height)
-        if self.sky_size != size and hasattr(context, 'createLinearGradient'):
-            sky = context.createLinearGradient(0, 0, 0, height)
-            sky.addColorStop(0, '#81b5c6')
-            sky.addColorStop(0.58, '#d1e6dd')
-            sky.addColorStop(1, '#f1ecce')
-            self.sky = sky
-            self.sky_size = size
-        context.fillStyle = self.sky
-        context.fillRect(0, 0, width, height)
-        context.strokeStyle = '#fff0c7'
-        context.lineWidth = max(1.5, width / 480)
-        context.lineJoin = 'round'
-        last_color = None
-        path_type = self.path_type
-        for _, points, color, selected in visible:
-            if last_color != color:
-                context.fillStyle = color
-                last_color = color
-            if path_type is not None:
-                path = path_type.new('M' + ' '.join(f'{px:.1f},{py:.1f}' for px, py in points) + 'Z')
-                context.fill(path)
-                if selected:
-                    context.stroke(path)
-            else:
-                context.beginPath()
+        if color is not None:
+            context.fillStyle = color
+        paint = context.stroke if color is None else context.fill
+        if self.path_type is not None:
+            commands = "".join("M" + " ".join(f"{x:.1f},{y:.1f}" for x, y in points) + "Z"
+                               for points in polygons)
+            paint(self.path_type.new(commands))
+        else:
+            context.beginPath()
+            for points in polygons:
                 context.moveTo(*points[0])
                 for point in points[1:]:
                     context.lineTo(*point)
                 context.closePath()
-                context.fill()
-                if selected:
-                    context.stroke()
-
-    @staticmethod
-    def _clip_near(polygon, near):
-        clipped = []
-        previous = polygon[-1]
-        for current in polygon:
-            if (previous[2] >= near) != (current[2] >= near):
-                fraction = (near - previous[2]) / (current[2] - previous[2])
-                clipped.append((previous[0] + (current[0] - previous[0]) * fraction,
-                                previous[1] + (current[1] - previous[1]) * fraction,
-                                near))
-            if current[2] >= near:
-                clipped.append(current)
-            previous = current
-        return clipped
+            paint()
 
 
 MATERIALS = (
@@ -420,12 +717,13 @@ class Game:
         try:
             for x, y, z, block in saved.get("edits", []):
                 if all(isinstance(value, int) for value in (x, y, z, block)):
-                    if -96 <= x <= 143 and 1 <= y <= 64 and -96 <= z <= 143 and 0 <= block <= 6:
+                    if self.can_edit(x, y, z) and 0 <= block <= 6:
                         self.world.set(x, y, z, block)
                         self.edits[x, y, z] = block
             x, y, z, yaw, pitch = saved["player"]
             if all(math.isfinite(value) for value in (x, y, z, yaw, pitch)):
-                if -100 < x < 148 and -8 < y < 70 and -100 < z < 148 and not self.world.collides(x, y, z):
+                limit = self.world.SIZE + 100
+                if -100 < x < limit and -8 < y < 70 and -100 < z < limit and not self.world.collides(x, y, z):
                     self.x, self.y, self.z = x, y, z
                     self.yaw = yaw % math.tau
                     self.pitch = max(-1.52, min(1.52, pitch))
@@ -536,13 +834,16 @@ class Game:
         if event.button == 0 and self.world.get(*hit) != 7:
             self.edit(hit, 0)
         elif event.button == 2 and empty is not None:
-            x, y, z = empty
-            if -96 <= x <= 143 and 1 <= y <= 64 and -96 <= z <= 143:
+            if self.can_edit(*empty):
                 self.world.set(*empty, self.selection)
                 if self.world.collides(self.x, self.y, self.z):
                     self.world.set(*empty, 0)
                 else:
                     self.edit(empty, self.selection)
+
+    def can_edit(self, x, y, z):
+        limit = self.world.SIZE + 96
+        return -96 <= x < limit and 1 <= y <= 64 and -96 <= z < limit
 
     def edit(self, position, block):
         self.world.set(*position, block)
