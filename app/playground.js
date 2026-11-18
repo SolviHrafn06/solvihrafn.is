@@ -6,6 +6,7 @@ import { marked } from 'marked';
 import { useExperience } from './experience';
 import { languages, defaults, javaSource, csharpSource, cppSource } from './lab-data';
 import { ROWS, COLS, initialWalls, findPath, jumpMetrics, steeringMetrics } from './lab-math.mjs';
+import { attachPythonCanvas, isCanvasSource } from './python-canvas';
 
 const frameStyle = `*{box-sizing:border-box}body{margin:0;padding:28px;font:15px/1.7 system-ui,sans-serif;background:#f4f1e9;color:#242720;overflow-wrap:anywhere}h1{font-size:32px;line-height:1.15;letter-spacing:-1px}h2{font-size:22px}a{color:#8e371a;text-underline-offset:4px}pre{background:#242720;color:#f4f1e9;padding:18px;border-radius:8px;overflow:auto;font-size:12px}.game-card{background:#fffdf7;border:1px solid #d7d7ca;padding:26px;border-radius:16px;box-shadow:8px 8px 0 #ee754c}.tag{font-size:10px;letter-spacing:1.5px;color:#686a60}.game-card a{display:inline-block;margin-top:10px;border-radius:6px;background:#242720;color:#fff;padding:10px 16px;text-decoration:none}blockquote{border-left:3px solid #ee754c;margin-left:0;padding-left:16px}table{border-collapse:collapse}td,th{padding:6px 12px;border:1px solid #d7d7ca}`;
 function frameDocument(content, css = '', reduced = false) {
@@ -22,12 +23,15 @@ export function Playground() {
   const [result, setResult] = useState(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [canvasActive, setCanvasActive] = useState(false);
+  const [exampleLoading, setExampleLoading] = useState(false);
   const [walls, setWalls] = useState(initialWalls);
   const [search, setSearch] = useState(null);
   const [power, setPower] = useState(10), [gravity, setGravity] = useState(10);
   const [targetX, setTargetX] = useState(280), [targetY, setTargetY] = useState(60), [speed, setSpeed] = useState(100);
   const [run, setRun] = useState(0);
   const workerRef = useRef(null), timerRef = useRef(null), workerKind = useRef(null);
+  const canvasHost = useRef(null), canvasRun = useRef(null), exampleRequest = useRef(null);
   const { reduced } = useExperience();
   const current = languages.find(item => item.id === selected);
   const source = selected === 'java' ? javaSource(walls) : selected === 'csharp' ? csharpSource(power, gravity) : selected === 'cpp' ? cppSource(targetX, targetY, speed) : sources[selected];
@@ -38,10 +42,18 @@ export function Playground() {
       if (languages.some(item => item.id === event.detail)) select(event.detail);
     }
     window.addEventListener('lab:select', fromRibbon);
-    return () => { workerRef.current?.terminate(); clearTimeout(timerRef.current); window.removeEventListener('lab:select', fromRibbon); };
+    return () => {
+      canvasRun.current?.dispose();
+      exampleRequest.current?.abort();
+      workerRef.current?.terminate();
+      clearTimeout(timerRef.current);
+      window.removeEventListener('lab:select', fromRibbon);
+    };
   }, []);
 
   function stop() {
+    canvasRun.current?.dispose(); canvasRun.current = null; setCanvasActive(false);
+    exampleRequest.current?.abort(); exampleRequest.current = null; setExampleLoading(false);
     workerRef.current?.terminate(); workerRef.current = null; workerKind.current = null;
     clearTimeout(timerRef.current); setBusy(false);
   }
@@ -57,15 +69,42 @@ export function Playground() {
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => { stop(); setResult({ error: true, text: 'Keyrslan tók of langan tíma og var stöðvuð. Stytta má lykkjur eða prófa aftur.' }); setStatus('Keyrsla stöðvuð'); }, delay);
   }
+
+  async function loadPythonExample() {
+    stop();
+    setResult(null);
+    setStatus('Sæki dæmið…');
+    setExampleLoading(true);
+    const request = new AbortController();
+    exampleRequest.current = request;
+    try {
+      const response = await fetch('/examples/silt_and_spruce.py', { signal: request.signal });
+      if (!response.ok) throw new Error();
+      const code = await response.text();
+      if (exampleRequest.current === request) {
+        setSources(old => ({ ...old, python: code }));
+        setStatus('Dæmið er tilbúið. Ýttu á Keyra.');
+      }
+    } catch {
+      if (exampleRequest.current === request) setStatus('Ekki tókst að sækja dæmið.');
+    } finally {
+      if (exampleRequest.current === request) {
+        exampleRequest.current = null;
+        setExampleLoading(false);
+      }
+    }
+  }
+
   function execute() {
     if (current.kind === 'model') {
       setRun(count => count + 1);
       if (selected === 'java') setSearch(findPath(walls));
       return;
     }
-    setBusy(true); setStatus(selected === 'python' ? 'Undirbý Python…' : 'Keyri kóðann…'); setResult(null);
+    const graphics = selected === 'python' && isCanvasSource(source);
+    setStatus(selected === 'python' ? 'Undirbý Python…' : 'Keyri kóðann…'); setResult(null);
     try {
-      if (!workerRef.current || workerKind.current !== selected) {
+      if (graphics || canvasRun.current || !workerRef.current || workerKind.current !== selected) {
         stop();
         workerRef.current = new Worker(`/workers/${selected}.js`, selected === 'python' ? { type: 'module' } : undefined);
         workerKind.current = selected;
@@ -73,15 +112,29 @@ export function Playground() {
       setBusy(true);
       const worker = workerRef.current;
       worker.onmessage = ({ data }) => {
+        if (workerRef.current !== worker) return;
         if (data.type === 'loading') { setStatus(data.text); return; }
-        if (data.type === 'ready') { setStatus('Keyri Python…'); timeout(3000); return; }
+        if (data.type === 'ready') { setStatus('Keyri Python…'); timeout(graphics ? 5000 : 3000); return; }
+        if (graphics && data.type === 'canvas-state') { canvasRun.current.setPaused(data.paused); return; }
+        if (graphics && data.type === 'canvas-save') { canvasRun.current.save(data.text); return; }
         clearTimeout(timerRef.current); setBusy(false);
+        if (graphics && data.type === 'canvas-ready') { setStatus('Leikurinn er tilbúinn'); return; }
+        if (graphics) stop();
         setStatus(data.type === 'error' ? 'Villa í kóða' : 'Keyrslu lokið');
         setResult({ text: data.text, tables: data.tables, error: data.type === 'error' });
       };
-      worker.onerror = event => { stop(); setStatus('Keyrsla tókst ekki'); setResult({ error: true, text: event.message || 'Ekki tókst að hlaða keyrsluvélinni. Athugaðu nettengingu og prófaðu aftur.' }); };
+      worker.onerror = event => {
+        if (workerRef.current !== worker) return;
+        stop(); setStatus('Keyrsla tókst ekki'); setResult({ error: true, text: event.message || 'Ekki tókst að hlaða keyrsluvélinni. Athugaðu nettengingu og prófaðu aftur.' });
+      };
       timeout(selected === 'python' ? 90000 : selected === 'sql' ? 10000 : 2000);
-      worker.postMessage({ code: source });
+      if (graphics) {
+        canvasRun.current = attachPythonCanvas(canvasHost.current, worker);
+        canvasRun.current.run(source);
+        setCanvasActive(true);
+      } else {
+        worker.postMessage({ code: source });
+      }
     } catch (error) { stop(); setResult({ error: true, text: error.message }); }
   }
   function download() {
@@ -110,20 +163,21 @@ export function Playground() {
       <div className="demo-heading"><div><p className="eyebrow">{current.name} / {String(languages.indexOf(current) + 1).padStart(2, '0')}</p><h3>{current.title}</h3><p>{current.intro}</p></div><span className={`runtime-badge ${current.kind === 'model' ? 'is-model' : ''}`}><i />{current.mode}</span></div>
       <div className="workbench">
         <div className="editor-pane"><div className="pane-bar"><span className="window-dots" aria-hidden="true"><i/><i/><i/></span><span>{current.file}</span><span>{current.kind === 'model' ? 'FRUMKÓÐI' : 'BREYTTU MÉR'}</span></div>
-          <label className="sr-only" htmlFor="code-editor">{current.name} kóði</label><textarea id="code-editor" spellCheck="false" autoCapitalize="off" autoCorrect="off" value={source} readOnly={current.kind === 'model'} maxLength={120000000} onChange={e => { setSources(old => ({ ...old, [selected]: e.target.value })); }} onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && current.kind === 'runtime' && !busy) { e.preventDefault(); execute(); } }} />
+          <label className="sr-only" htmlFor="code-editor">{current.name} kóði</label><textarea id="code-editor" spellCheck="false" autoCapitalize="off" autoCorrect="off" value={source} readOnly={current.kind === 'model'} maxLength={120000000} onChange={e => { setSources(old => ({ ...old, [selected]: e.target.value })); }} onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && current.kind === 'runtime' && !busy && !exampleLoading) { e.preventDefault(); execute(); } }} />
           <div className="editor-tools"><span>{current.kind === 'model' ? 'Kóðinn fylgir stillingunum.' : `${source.split('\n').length} línur · ${current.kind === 'preview' ? 'Lifandi forskoðun' : 'Ctrl + Enter keyrir'}`}</span><button onClick={download}>Sækja kóða ↓</button></div>
         </div>
         <div className="result-pane"><div className="pane-bar"><span>{current.kind === 'preview' ? 'FORSKOÐUN' : current.kind === 'model' ? 'HERMUN' : 'NIÐURSTAÐA'}</span><span className="result-dot" /></div>
           {current.kind === 'preview' && <iframe key={selected + previewSource} className="code-preview" title={`${current.name} forskoðun`} sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={preview} />}
-          {current.kind === 'runtime' && <div className={`runtime-output ${result?.error ? 'has-error' : ''}`}>
-            {busy ? <p className="loading-output"><span className="loader"/>{status}</p> : result ? <><pre>{result.text}</pre>{result.tables?.map((table, i) => <div className="sql-table-wrap" key={i}><table><thead><tr>{table.columns.map((name, j) => <th key={j}>{name}</th>)}</tr></thead><tbody>{table.values.map((row, r) => <tr key={r}>{row.map((value, c) => <td key={c}>{value === null ? 'NULL' : String(value)}</td>)}</tr>)}</tbody></table><p className="table-count">{table.values.length} línur</p></div>)}</> : <div className="output-empty"><span aria-hidden="true">↳</span><p>Kóðinn er tilbúinn.<br/>Ýttu á <strong>Keyra</strong> og sjáðu hvað gerist.</p>{selected === 'python' && <small>Python-vélin er sótt við fyrstu keyrslu.</small>}{selected === 'sql' && <small>SQLite · sýnigögn · gagnagrunnur endurstillist við hverja keyrslu.</small>}</div>}
+          {current.kind === 'runtime' && <div className={`runtime-output ${result?.error ? 'has-error' : ''}`} style={selected === 'python' ? { position: 'relative' } : undefined}>
+            {selected === 'python' && <div ref={canvasHost} hidden={!canvasActive || busy} style={{ position: 'absolute', inset: 0 }} />}
+            {busy ? <p className="loading-output"><span className="loader"/>{status}</p> : canvasActive ? null : result ? <><pre>{result.text}</pre>{result.tables?.map((table, i) => <div className="sql-table-wrap" key={i}><table><thead><tr>{table.columns.map((name, j) => <th key={j}>{name}</th>)}</tr></thead><tbody>{table.values.map((row, r) => <tr key={r}>{row.map((value, c) => <td key={c}>{value === null ? 'NULL' : String(value)}</td>)}</tr>)}</tbody></table><p className="table-count">{table.values.length} línur</p></div>)}</> : <div className="output-empty"><span aria-hidden="true">↳</span><p>Kóðinn er tilbúinn.<br/>Ýttu á <strong>Keyra</strong> og sjáðu hvað gerist.</p>{selected === 'python' && <small>Python-vélin er sótt við fyrstu keyrslu.</small>}{selected === 'sql' && <small>SQLite · sýnigögn · gagnagrunnur endurstillist við hverja keyrslu.</small>}</div>}
           </div>}
           {selected === 'java' && <div className="model-output"><p className="model-hint">Smelltu á reiti til að breyta veggjunum.</p><div className="maze" key={run}>{Array.from({ length: ROWS * COLS }, (_, i) => <button key={i} disabled={i === 0 || i === ROWS * COLS - 1} aria-label={`Reitur ${Math.floor(i / COLS) + 1}, ${i % COLS + 1}${i === 0 ? ', upphaf' : i === 47 ? ', mark' : ''}`} aria-pressed={walls.includes(i)} className={`${walls.includes(i) ? 'wall' : ''} ${search?.path.includes(i) ? 'path' : search?.visited.includes(i) ? 'visited' : ''}`} style={{ '--cell-delay': `${(search?.visited.indexOf(i) ?? 0) * 15}ms` }} onClick={() => { setWalls(old => old.includes(i) ? old.filter(cell => cell !== i) : [...old, i]); setSearch(null); }}>{i === 0 ? 'S' : i === 47 ? 'M' : search?.path.includes(i) ? '·' : ''}</button>)}</div><div className="model-stats"><span>Breiddarleit / BFS</span><strong>{search ? search.path.length ? `${search.path.length - 1} skref að marki` : 'Engin leið að marki' : 'Bíður eftir leit'}</strong></div></div>}
           {selected === 'csharp' && <div className="model-output"><div className="model-controls"><Range label="Hoppkraftur" value={power} min={5} max={16} unit=" m/s" onChange={v => { setPower(v); setRun(0); }}/><Range label="Þyngdarhröðun" value={gravity} min={5} max={20} unit=" m/s²" onChange={v => { setGravity(v); setRun(0); }}/></div><svg className="model-scene" viewBox="0 0 360 210" role="img" aria-label="Hoppferill eftir hreyfijöfnu"><path d="M20 185H340" stroke="currentColor" opacity=".25"/><path d={`M${Array.from({length:41},(_,i)=>{const t=jump.time*i/40;return `${25+i*7.6},${185-(power*t-.5*gravity*t*t)*5}`;}).join(' L')}`} stroke="var(--accent)" strokeWidth="2" strokeDasharray="4 5" fill="none"/><motion.circle key={`${run}-${power}-${gravity}`} r="10" fill="var(--accent)" initial={{cx:25,cy:185}} animate={run ? {cx: reduced ? 329 : Array.from({length:41},(_,i)=>25+i*7.6), cy: reduced ? 185 : Array.from({length:41},(_,i)=>{const t=jump.time*i/40;return 185-(power*t-.5*gravity*t*t)*5;})} : {cx:25,cy:185}} transition={{duration:reduced ? 0 : jump.time,ease:'linear'}}/></svg><div className="model-stats"><span>Hæð <strong>{jump.height.toFixed(2)} m</strong></span><span>Flugtími <strong>{jump.time.toFixed(2)} s</strong></span></div></div>}
           {selected === 'cpp' && <div className="model-output"><div className="model-controls"><Range label="Markpunktur X" value={targetX} min={70} max={320} onChange={v => {setTargetX(v);setRun(0);}}/><Range label="Markpunktur Y" value={targetY} min={25} max={170} onChange={v => {setTargetY(v);setRun(0);}}/><Range label="Hraði" value={speed} min={40} max={200} unit=" px/s" onChange={v => {setSpeed(v);setRun(0);}}/></div><svg className="model-scene steering-scene" viewBox="0 0 360 190" role="img" aria-label="Punktur ferðast eftir stefnu í átt að marki"><path d={`M35 130L${targetX} ${targetY}`} stroke="currentColor" strokeDasharray="4 5" opacity=".3"/><circle cx={targetX} cy={targetY} r="15" fill="none" stroke="var(--accent)"/><path d={`M${targetX-5} ${targetY}h10M${targetX} ${targetY-5}v10`} stroke="var(--accent)"/><motion.circle key={`${run}-${targetX}-${targetY}-${speed}`} r="9" fill="var(--ink)" initial={{cx:35,cy:130}} animate={run ? {cx:targetX,cy:targetY} : {cx:35,cy:130}} transition={{duration:reduced ? 0 : steering.time,ease:'linear'}}/></svg><div className="model-stats"><span>Vegalengd <strong>{steering.distance.toFixed(1)} px</strong></span><span>Ferðatími <strong>{steering.time.toFixed(2)} s</strong></span></div></div>}
         </div>
       </div>
-      <div className="lab-actions"><div className="lab-action-buttons">{current.kind !== 'preview' && <button className="run-button" disabled={busy} onClick={execute}><span aria-hidden="true">▶</span>{busy ? 'Keyri…' : current.kind === 'model' ? 'Prófa hermun' : 'Keyra'}</button>}{busy && <button className="quiet-button" onClick={() => {stop(); setStatus('Keyrsla stöðvuð');}}>Stöðva</button>}<button className="quiet-button" onClick={reset}>Endurstilla ↺</button></div><p role="status" className="execution-status">{current.kind === 'model' ? 'Hermunin keyrir í JavaScript. Frumkóðann má sækja og keyra í viðeigandi þróunarumhverfi.' : current.kind === 'preview' ? 'Forskoðunin uppfærist þegar þú breytir kóðanum.' : status || 'Prófaðu, breyttu og keyrðu aftur.'}</p></div>
+      <div className="lab-actions"><div className="lab-action-buttons" style={selected === 'python' ? { flexWrap: 'wrap' } : undefined}>{current.kind !== 'preview' && <button className="run-button" disabled={busy || exampleLoading} onClick={execute}><span aria-hidden="true">▶</span>{busy ? 'Keyri…' : current.kind === 'model' ? 'Prófa hermun' : 'Keyra'}</button>}{(busy || canvasActive) && <button className="quiet-button" onClick={() => {stop(); setStatus('Keyrsla stöðvuð');}}>Stöðva</button>}<button className="quiet-button" onClick={reset}>Endurstilla ↺</button>{selected === 'python' && <button className="quiet-button" disabled={exampleLoading} onClick={loadPythonExample}>Silt &amp; Spruce</button>}</div><p role="status" className="execution-status">{current.kind === 'model' ? 'Hermunin keyrir í JavaScript. Frumkóðann má sækja og keyra í viðeigandi þróunarumhverfi.' : current.kind === 'preview' ? 'Forskoðunin uppfærist þegar þú breytir kóðanum.' : status || 'Prófaðu, breyttu og keyrðu aftur.'}</p></div>
     </div>
   </div>;
 }
